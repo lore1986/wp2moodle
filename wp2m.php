@@ -180,6 +180,9 @@ function wp2moodle_handler( $atts, $content = null ) {
 		"activity" => 0,
 		"cmid" => 0,
 		"url" => '',
+		"expirydate" => '',
+		'duration' => '',
+		'startdate' => '',
 	), $atts));
 
 	if ($content == null || !is_user_logged_in() ) {
@@ -190,7 +193,7 @@ function wp2moodle_handler( $atts, $content = null ) {
 		}
 	} else {
 		// url = moodle_url + "?data=" + <encrypted-value>
-		$url = '<a target="'.esc_attr($target).'" class="'.esc_attr($class).'" href="'.wp2moodle_generate_hyperlink($cohort,$group,$course,$activity,$url,$cmid).'">'.do_shortcode($content).'</a>'; // hyperlinked content
+		$url = '<a target="'.esc_attr($target).'" class="'.esc_attr($class).'" href="'.wp2moodle_generate_hyperlink($cohort,$group,$course,$activity,$url,$cmid, $expirydate,$duration, $startdate).'">'.do_shortcode($content).'</a>'; // hyperlinked content
 	}
 	return $url;
 }
@@ -221,6 +224,9 @@ function wp2m_download_url($url, $order, $download) {
 		$urllog = "";
 		$activity = 0;
 		$cmid = 0;
+		$enddate = "";
+		$duration = 0;
+		$startdate = "";
 		$data = file($path); // now it's an array!
 		foreach ($data as $row) {
 			$pair = explode("=",$row);
@@ -243,9 +249,18 @@ function wp2m_download_url($url, $order, $download) {
 				case "url":
 					$urllog = trim(str_replace(array('\'','"'), '', $pair[1]));
 					break;
+				case "expirydate":
+					$expirydate = trim(str_replace(array('\'','"'), '', $pair[1]));
+					break;
+				case "startdate":
+					$startdate = trim(str_replace(array('\'','"'), '', $pair[1]));
+					break;
+				case "duration":
+					$duration = trim(str_replace(array('\'','"'), '', $pair[1]));
+					break;
 			}
 		}
-		$url = wp2moodle_generate_hyperlink($cohort,$group,$course,$activity,$urllog,$cmid);
+		$url = wp2moodle_generate_hyperlink($cohort,$group,$course,$activity,$urllog,$cmid, $expirydate, $duration, $startdate);
 		if (ob_get_contents()) { ob_clean(); }
 		header('Location: ' . $url, true, 301); // redirect to this url
 		exit();
@@ -267,7 +282,8 @@ function remove_unwanted_mp_meta_boxes() {
 /*
  * Function to build the encrypted hyperlink
  */
-function wp2moodle_generate_hyperlink($cohort,$group,$course,$activity = 0, $url = null, $cmid = 0) {
+function wp2moodle_generate_hyperlink($cohort,$group,$course,$activity = 0, $url = null, 
+										$cmid = 0, $expirydate, $duration, $startdate) {
 
 	// needs authentication; ensure userinfo globals are populated
 	global $current_user;
@@ -289,7 +305,10 @@ function wp2moodle_generate_hyperlink($cohort,$group,$course,$activity = 0, $url
 		"course" => $course,								// string containing course id, optional
 		"activity" => $activity,							// index of first [visible] activity to go to, if auto-open is enabled in moodle
 		"cmid" => $cmid,									// coursemodule id
-		"url" => rawurlencode($url)							// url to open after logon
+		"url" => rawurlencode($url),						// url to open after logon
+		"expirydate" => $expirydate,
+		"duration" => $duration,
+		"startdate" => $startdate
 	);
 
 	// encode array as querystring

@@ -46,6 +46,17 @@ if (!isset($PASSTHROUGH_KEY)) {
 	echo "Sorry, this plugin has not yet been configured. Please contact the Moodle administrator for details.";
 }
 
+function fixdates($dated)
+{
+	$splitone			= str_split($dated, 4);
+	$splitwo			= str_split($splitone[0], 2);
+	$recomposedstring   = $splitwo[0]. "-". $splitwo[1] . "-" . $splitone[1];
+	$enddate			= DateTime::createFromFormat('d-m-Y', $recomposedstring);
+	$endtimestamp		= $enddate->getTimestamp();
+
+	return $endtimestamp;
+}
+
 $rawdata = $_GET['data'];
 if (!empty($_GET)) {
 
@@ -72,6 +83,10 @@ if (!empty($_GET)) {
 	$timestamp 			= (integer) get_key_value($userdata, "stamp"); // remote site should have set this to new DateTime("now").getTimestamp(); which is a unix timestamp (utc)
 	$theirs				= new DateTime("@$timestamp"); // @ format here: http://www.gnu.org/software/tar/manual/html_node/Seconds-since-the-Epoch.html#SEC127
 	$diff 				= floatval(date_diff(date_create("now"), $theirs)->format("%i")); // http://www.php.net/manual/en/dateinterval.format.php
+	
+	//Define values for start and end date
+	$starttimestamp=0;
+	$endtimestamp=0;
 
 	// check the timestamp to make sure that the request is still within a few minutes of this servers time
 	if ($timestamp > 0 && ($timeout == 0 || $diff <= $timeout)) { // less than N minutes passed since this link was created or timeout=0, so it's still ok
@@ -86,6 +101,32 @@ if (!empty($_GET)) {
 		$group_idnumbers 	= get_key_value($userdata, "group");
 		$course_idnumbers 	= get_key_value($userdata, "course");
 
+		//Extras value
+		$startdatelink 		= get_key_value($userdata, "startdate");
+		$linkexpirationdate	= get_key_value($userdata, "expirydate");
+		$duration 			= (integer) get_key_value($userdata, "duration");
+
+		
+
+		if($linkexpirationdate != null && $startdatelink != null){
+			$endtimestamp	= fixdates($linkexpirationdate);
+			$starttimestamp = fixdates($startdatelink);
+		} else if($duration != null) {
+			if($startdatelink != null)
+			{
+				$starttimestamp = fixdates($startdatelink);
+				$endtimestamp = strtotime($starttimestamp) + (24*3600*$duration);
+			}
+			else{
+				$starttimestamp = time();
+				$endtimestamp = strtotime(date('d-m-Y', strtotime("+". $duration." days")));
+			}
+			
+		} else{
+			$endtimestamp	= 0;
+			$starttimestamp = 0;
+		}
+
 		// specifify either the activity order (topmost being 1, counting down the page);
 		// or specify the activity id number - the XXX in moodle when your url is /mod/activitymame/view.php?id=XXX
 		// specify one, not both.
@@ -97,11 +138,13 @@ if (!empty($_GET)) {
 		$wantsurl 			= get_key_value($userdata, "url");
 
 		// set DB record lookup match value; default = idnumber
-		switch ($matchfield) {
+		/* switch ($matchfield) {
 			case "username": $matchvalue = $username; break;
 			case "email":    $matchvalue = $email;    break;
 			default:		 $matchvalue = $idnumber; $matchfield = "idnumber";
-		}
+		} */
+		$matchfield = 'email';
+		$matchvalue = $email;
 
 		// find the user record (if it exists) and update if required
 		if ($DB->record_exists('user', [$matchfield => $matchvalue])) {
@@ -147,7 +190,7 @@ if (!empty($_GET)) {
 			$updateuser->mnethostid 	= $CFG->mnet_localhost_id;
 			$updateuser = truncate_user($updateuser);
 			$updateuser->id = $DB->insert_record('user', $updateuser);
-			\core\event\user_created::create_from_userid($user->id)->trigger();
+			\core\event\user_created::create_from_userid($updateuser->id)->trigger();
 			$user = get_complete_user_data('id', $updateuser->id);
 		}
 
@@ -173,13 +216,27 @@ if (!empty($_GET)) {
 		}
 
 		// Enrol users to matched GROUPS
+		// TO EDIT ENROLL INTO COURSE IS CUSTOM FUNCTION CALL ENROL USER OF MOODLE
 		if (!empty($group_idnumbers) && $redirectnoenrol === '0') {
 			$ids = array_map('trim', explode(',', $group_idnumbers));
 			foreach ($ids as $group) {
 				if ($DB->record_exists('groups', array('idnumber'=>$group))) {
 					$grouprow = $DB->get_record('groups', array('idnumber'=>$group));
 					$courseId = $grouprow->courseid;
-					enrol_into_course($courseId, $user->id);
+					$context = context_course::instance($courseId);
+
+					if(is_enrolled($context, $user->id, '', true)){
+					}
+					else{
+						if($starttimestamp === 0 && $endtimestamp === 0)
+						{
+							enrol_into_course($courseId, $user->id);
+						}
+						else{
+							enrol_into_course_with_dates($courseId, $user->id,5,$starttimestamp,$endtimestamp);
+						}
+					}
+
 					if (!$DB->record_exists('groups_members', array('groupid'=>$grouprow->id, 'userid'=>$user->id))) {
 						// internally triggers groups_member_added event
 						groups_add_member($grouprow->id, $user->id);
@@ -188,17 +245,31 @@ if (!empty($_GET)) {
 			}
 		}
 
-		// Enrol users to matched COURSES
+		// Enrol users to matched COURSES starttimestamp endtimestamp
 		if (!empty($course_idnumbers)) {
 			$studentrow = $DB->get_record('role', array('shortname'=>'student'));
 			$ids = array_map('trim', explode(',', $course_idnumbers));
 			foreach ($ids as $course) {
 				if ($DB->record_exists('course', array('idnumber'=>$course))) {
 					$courserow = $DB->get_record('course', array('idnumber'=>$course));
-					if ($redirectnoenrol === '0') { // 0 = try enrol; 1 = skip enrol
-						if (!enrol_try_internal_enrol($courserow->id, $user->id, $studentrow->id)) {
-							continue;
-						}
+					$context = context_course::instance($courserow->id);
+
+					if(is_enrolled($context, $user->id, '', true)){
+					}
+					else{
+						if($starttimestamp === 0 && $endtimestamp === 0)
+						{
+							if (!enrol_try_internal_enrol($courserow->id, $user->id, $studentrow->id)) 
+							{
+								continue;
+							}
+						} 
+						else{
+							if (!enrol_try_internal_enrol($courserow->id, $user->id, $studentrow->id, $starttimestamp, $endtimestamp)) 
+							{
+								continue;
+							}
+						}	
 					}
 					$courseId = $courserow->id;
 				}

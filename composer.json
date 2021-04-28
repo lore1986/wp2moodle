@@ -1,6 +1,6 @@
 {
   "name": "frumbert/wp2moodle",
-  "description": "combination moodle and wordpress plugin for single sign on from wordpress to moodle",
+  "description": "combination test moodle and wordpress plugin for single sign on from wordpress to moodle",
   "type": "wordpress-plugin",
   "keywords": [
     "moodle",

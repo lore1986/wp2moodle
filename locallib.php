@@ -31,6 +31,7 @@ function wp2m_is_base64($string) {
     return true;
 }
 
+
 function decrypt_string($data, $key) {
 	if ( wp2m_is_base64($key)) {
 		$encryption_key = base64_decode($key);
@@ -86,6 +87,21 @@ function enrol_into_course($courseid, $userid, $roleid = 5) {
 	);
 	// retrieve enrolment instance associated with your course
 	return $manualenrol->enrol_user($enrolinstance, $userid, $roleid); // enrol the user
+}
+
+function enrol_into_course_with_dates($courseid, $userid, $roleid = 5, $startdate, $enddate) {
+	global $DB;
+	$manualenrol = enrol_get_plugin('manual'); // get the enrolment plugin
+	$enrolinstance = $DB->get_record('enrol',
+		array('courseid'=>$courseid,
+			'status'=>ENROL_INSTANCE_ENABLED,
+			'enrol'=>'manual'
+		),
+		'*',
+		MUST_EXIST
+	);
+	// retrieve enrolment instance associated with your course
+	return $manualenrol->enrol_user($enrolinstance, $userid, $roleid, $startdate, $enddate); // enrol the user
 }
 
 function check_user_email($email) {
